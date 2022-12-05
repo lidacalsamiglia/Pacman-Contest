@@ -120,7 +120,11 @@ class HeadlessChickenAgent(CaptureAgent):
             self.firstiterations += 1
             return 'West'
         else:
-            return random.choice(actions)
+            action = random.choice(actions)
+            if( action == 'East' or action == 'West'):
+                return 'Stop'
+            else:
+                return action
 
     def get_successor(self, game_state, action):
         """
