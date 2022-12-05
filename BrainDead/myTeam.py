@@ -48,6 +48,8 @@ def create_team(first_index, second_index, is_red,
     any extra arguments, so you should make sure that the default
     behavior is what you want for the nightly contest.
     """
+    if not is_red:
+        first='OffensiveReflexAgent'
     return [eval(first)(first_index), eval(second)(second_index)]
 
 
@@ -60,7 +62,6 @@ class HeadlessChickenAgent(CaptureAgent):
     """
     A base class for reflex agents that choose score-maximizing actions
     """
-
     def __init__(self, index, time_for_computing=.1):
         super().__init__(index, time_for_computing)
         self.start = None
@@ -120,11 +121,29 @@ class HeadlessChickenAgent(CaptureAgent):
             self.firstiterations += 1
             return 'West'
         else:
-            action = random.choice(actions)
-            if( action == 'East' or action == 'West'):
-                return 'Stop'
-            else:
-                return action
+            #our agent becomes a defensive agent 
+            actions = game_state.get_legal_actions(self.index)
+            values = [self.evaluate(game_state, a) for a in actions]
+        
+            max_value = max(values)
+            best_actions = [a for a, v in zip(actions, values) if v == max_value]
+
+            food_left = len(self.get_food(game_state).as_list())
+
+            if food_left <= 2:
+                best_dist = 9999
+                best_action = None
+                for action in actions:
+                    successor = self.get_successor(game_state, action)
+                    pos2 = successor.get_agent_position(self.index)
+                    dist = self.get_maze_distance(self.start, pos2)
+                    if dist < best_dist:
+                        best_action = action
+                        best_dist = dist
+                return best_action
+
+            return random.choice(best_actions)
+           
 
     def get_successor(self, game_state, action):
         """
@@ -146,140 +165,34 @@ class HeadlessChickenAgent(CaptureAgent):
         weights = self.get_weights(game_state, action)
         return features * weights
 
+ 
     def get_features(self, game_state, action):
-        """
-        Returns a counter of features for the state
-        """
         features = util.Counter()
         successor = self.get_successor(game_state, action)
-        features['successor_score'] = self.get_score(successor)
+
+        my_state = successor.get_agent_state(self.index)
+        my_pos = my_state.get_position()
+
+        # Computes whether we're on defense (1) or offense (0)
+        features['on_defense'] = 1
+        if my_state.is_pacman: features['on_defense'] = 0
+
+        # Computes distance to invaders we can see
+        enemies = [successor.get_agent_state(i) for i in self.get_opponents(successor)]
+        invaders = [a for a in enemies if a.is_pacman and a.get_position() is not None]
+        features['num_invaders'] = len(invaders)
+        if len(invaders) > 0:
+            dists = [self.get_maze_distance(my_pos, a.get_position()) for a in invaders]
+            features['invader_distance'] = min(dists)
+
+        if action == Directions.STOP: features['stop'] = 1
+        rev = Directions.REVERSE[game_state.get_agent_state(self.index).configuration.direction]
+        if action == rev: features['reverse'] = 1
+
         return features
 
     def get_weights(self, game_state, action):
-        """
-        Normally, weights do not depend on the game state.  They can be either
-        a counter or a dictionary.
-        """
-        return {'successor_score': 1.0}
-
-
-class Attacker(CaptureAgent):
-    """
-    A base class for reflex agents that choose score-maximizing actions
-    """
-
-    def __init__(self, index, time_for_computing=.1, epsilon=0.05,gamma=0.8,alpha=0.2, numTraining=0):
-        super().__init__(index, time_for_computing)
-        self.start = None
-        self.epsilon = epsilon
-        self.gamma = gamma
-        self.alpha = alpha
-        self.numTraining = numTraining
-
-    def register_initial_state(self, game_state):
-        self.start = game_state.get_agent_position(self.index)
-        CaptureAgent.register_initial_state(self, game_state)
-
-    def get_successor(self, game_state, action):
-        """
-        Finds the next successor which is a grid position (location tuple).
-        """
-        successor = game_state.generate_successor(self.index, action)
-        pos = successor.get_agent_state(self.index).get_position()
-        if pos != nearestPoint(pos):
-            # Only half a grid position was covered
-            return successor.generate_successor(self.index, action)
-        else:
-            return successor
-    
-    def get_features(self, game_state, action):
-        """
-        Returns a counter of features for the state
-        """
-        features = util.Counter()
-        successor = self.get_successor(game_state, action)
-        features['successor_score'] = self.get_score(successor)
-        return features
-
-    def get_weights(self, game_state, action):
-        """
-        Normally, weights do not depend on the game state.  They can be either
-        a counter or a dictionary.
-        """
-        return {'successor_score': 1.0}
-    
-    def computeValueFromQValues(self, game_state):
-        max = float("-inf")
-        actions = game_state.get_legal_actions(self.index)
-        if not actions:
-            return 0.0
-        else:
-          for action in actions:
-            qValue = self.getQValue(game_state,action)
-            if (qValue  > max):
-              max = qValue 
-          return max
-
-    def computeActionFromQValues(self, game_state):
-        #declare a tuple for the actions that have the max value
-        max_action = []
-        actions = game_state.get_legal_actions(self.index)
-        max = self.computeValueFromQValues(game_state)
-
-        #check if there's any actions
-        if not actions:
-            return None
-
-        for action in actions:
-          #get the qvalue of the action
-          qValue = self.getQValue(self.index,action)
-          if (qValue == max):
-            max_action.append(action)
-        return random.choice(max_action)
-
-    def choose_action(self, game_state):
-        actions = game_state.get_legal_actions(self.index)
-        action = None
-        if not actions:
-          return None
-        #"flip a coin" using the epsilon probability
-        if (util.flipCoin(self.epsilon)):
-          #if true, choose a random action
-          action = random.choice(actions)
-        else:
-          #if false, get the best action
-          action = self.computeActionFromQValues(game_state)
-        #return the result
-        return action
-
-    def getPolicy(self, game_state):
-        return self.computeActionFromQValues(game_state)
-
-    def getValue(self, game_state):
-        return self.computeValueFromQValues(game_state)
-
-    def getQValue(self, game_state, action):
-        features = self.get_features(game_state, action)
-        weights = self.get_weights(game_state, action)
-        qValue = 0
-    
-        for k in features:
-          qValue +=  weights[k] * features[k]
-        return qValue
-    
-    def update(self, game_state, action, nextState, reward):
-        qValue = self.getQValue(game_state,action)
-        features = self.get_features(game_state, action)
-        weights = self.get_weights(game_state, action)
-        next_qValue = self.computeValueFromQValues(nextState)
-        difference = (reward + self.discount*(next_qValue))- qValue
-        for k in features:
-          weights[k] += self.alpha*(difference)*features[k]
-        
-
-    def final(self, game_state):
-        "Called at the end of each game."
-        CaptureAgent.final(self, game_state)
+        return {'num_invaders': -1000, 'on_defense': 100, 'invader_distance': -10, 'stop': -100, 'reverse': -2}
 
 
 class ReflexCaptureAgent(CaptureAgent):
@@ -362,7 +275,7 @@ class ReflexCaptureAgent(CaptureAgent):
         return {'successor_score': 1.0}
 
 
-"""class OffensiveReflexAgent(ReflexCaptureAgent):
+class OffensiveReflexAgent(ReflexCaptureAgent):
     
 
     def get_features(self, game_state, action):
@@ -380,7 +293,7 @@ class ReflexCaptureAgent(CaptureAgent):
         return features
 
     def get_weights(self, game_state, action):
-        return {'successor_score': 100, 'distance_to_food': -1}"""
+        return {'successor_score': 100, 'distance_to_food': -1}
 
 
 class DefensiveReflexAgent(ReflexCaptureAgent):
